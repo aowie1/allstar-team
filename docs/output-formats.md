@@ -42,7 +42,7 @@ output:
 
 A surface or agent entry is either a level name (shorthand for `verbosity`) or a map of keys.
 
-**Per run.** `/allstar-team:review-pr 42 --verbosity terse --min-priority p1`, `/allstar-team:status --verbosity detailed`, `/allstar-team:work --min-priority p1`.
+**Per run.** `/allstar-team:review-pr 42 --verbosity terse --min-priority p1`, `/allstar-team:status --verbosity detailed`, `/allstar-team:work --min-priority p1`. `/allstar-team:review-pr` also takes `--review-only`, `--confirm-fix` and `--fix <sha7>`; these choose whether the contributor runs, not output settings (see `commands/review-pr.md`).
 
 **Orchestrators pass overrides, not settings.** `review-dispatcher` and `engineering-pm` give every agent they dispatch a `Surface: github|session` line and, when the run has command flags, an `Output settings:` line holding only those flags (for example `Output settings: verbosity=terse min_priority=p1`). Each dispatched agent resolves the rest itself (`agents.<own-name>` > `surfaces.<surface>` > `output.<key>` > default), so `agents: { code-reviewer: detailed }` applies under `/review-pr` too. An orchestrator's own `agents.<name>` entry (say `review-dispatcher: terse`) governs only its own output.
 
@@ -84,6 +84,7 @@ The default is `p3`, which lists everything. It applies wherever findings are li
 | Work result (agents that change things or write docs) | `DONE`, `PARTIAL`, `BLOCKED`, `OWNER` (`pr-contributor` adds `STALE`) |
 | Principal review outcome | `APPROVE`, `APPROVE-PENDING`, `CHANGES`, `OWNER`, `SPLIT`, `BLOCK` |
 | Combined PR state (dispatcher) | `READY TO MERGE`, `CHANGES REQUESTED`, `BLOCKED`, `NOT READY (<reason>)`, `FIXING`, `IN REVIEW`, `DRAFT`, `MERGED`, `CLOSED UNMERGED` |
+| Contributor line (dispatcher summary and report) | `Contributor: dispatched round N`, `Contributor: not dispatched, <exact guard or flag>`, `Contributor: not dispatched, awaiting confirmation (CONFIRM BEFORE FIX)` (with `--confirm-fix`; the report adds the held items, the reviewed `sha7` and `/allstar-team:review-pr <n> --fix <sha7>`) |
 | Finding ids | `F1`, `F2`, never a bare `#1` (GitHub links it to issue 1) |
 
 The token carries the meaning. With `emoji: true`, severities and owner decisions get a glyph (`🚨` Critical, `🔴` High, `🟡` Medium, `🟢` Low, `🚨 OWNER DECISION`). The `Verdict`, `Concern` and `Result` lines never carry a glyph, so they stay parseable.

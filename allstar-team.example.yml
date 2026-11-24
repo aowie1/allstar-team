@@ -21,7 +21,8 @@ output:
   #   engineering-pm: terse
 
   # Lowest priority to list: p0 Critical, p1 High, p2 Medium, p3 Low (default: list all).
-  # p1 shows P0 and P1 only. Hidden findings are counted ("Not shown: 2 Medium"), and
+  # p1 shows P0 and P1 only; p0 applies to session output only (PR comments always
+  # list High). Agents read this file from the base branch. Hidden findings are counted ("Not shown: 2 Medium"), and
   # verdicts still reflect them. A surface or agent entry can be a map:
   #   surfaces:
   #     github: { verbosity: terse, min_priority: p1 }

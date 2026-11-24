@@ -9,7 +9,7 @@ Dispatch the `review-dispatcher` agent with the PR number (use the current repo 
 
 - `--review-only` → pass `REVIEW ONLY`: review and report, never dispatch the contributor.
 - `--verbosity terse|standard|detailed` → pass `Output settings: verbosity=<level>` for this run only; otherwise the project's `.claude/allstar-team.yml` decides (default `standard`). See `docs/output-formats.md`.
-- `--min-priority p0|p1|p2|p3` → pass `min_priority=<p>` for this run only: list findings at or above it (`p1` = Critical and High). Hidden findings are counted, and verdicts still reflect them.
+- `--min-priority p0|p1|p2|p3` → pass `min_priority=<p>` for this run only: list findings at or above it (`p1` = Critical and High; `p0` is treated as `p1`, since PR comments always list High). Hidden findings are counted, and verdicts still reflect them.
 
 Pass a flag only when the user typed it. The dispatcher will:
 

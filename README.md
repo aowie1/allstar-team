@@ -59,7 +59,7 @@ output:
   agents: { code-reviewer: detailed }              # per agent
 ```
 
-Set `min_priority: p1` to list only P0 (Critical) and P1 (High) findings; the rest are counted, not hidden silently, and verdicts still reflect them. Or per run: `/allstar-team:review-pr 42 --verbosity terse --min-priority p1`. Critical and High findings, owner decisions and the reviewed SHA are shown at every level. Full spec: [`docs/output-formats.md`](docs/output-formats.md). After editing a shared block, run `scripts/check-output-contract.sh`.
+Set `min_priority: p1` to list only P0 (Critical) and P1 (High) findings; the rest are counted, not hidden silently, and verdicts still reflect them. Or per run: `/allstar-team:review-pr 42 --verbosity terse --min-priority p1`. Critical and High findings, owner decisions and the reviewed SHA are shown at every level; `p0` (hide High too) applies only to session output, never to PR comments. Settings come from the base branch's committed config, so a PR cannot change how it is reviewed. Full spec: [`docs/output-formats.md`](docs/output-formats.md). After editing a shared block, run `scripts/check-output-contract.sh`.
 
 ## Install
 

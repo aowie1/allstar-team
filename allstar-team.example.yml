@@ -7,10 +7,11 @@ output:
   #   detailed adds evidence, coverage, rationale and positives
   verbosity: standard
 
-  # Override by where the output lands. Beats `verbosity`.
-  surfaces:
-    session: standard   # replies in the Claude Code session
-    github: standard    # PR and issue comments
+  # Override by where the output lands. Beats `verbosity`: once uncommented,
+  # these win over the `verbosity` line above for their surface.
+  # surfaces:
+  #   session: standard   # replies in the Claude Code session
+  #   github: standard    # PR and issue comments
 
   # Override for one agent. Beats `surfaces`.
   # agents:

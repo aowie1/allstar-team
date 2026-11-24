@@ -42,7 +42,7 @@ output:
 
 A surface or agent entry is either a level name (shorthand for `verbosity`) or a map of keys.
 
-**Per run.** `/allstar-team:review-pr 42 --verbosity terse --min-priority p1`, `/allstar-team:status --verbosity detailed`, `/allstar-team:work --min-priority p1`.
+**Per run.** `/allstar-team:review-pr 42 --verbosity terse --min-priority p1`, `/allstar-team:status --verbosity detailed`, `/allstar-team:work --min-priority p1`. `/allstar-team:review-pr` also takes `--review-only`, `--confirm-fix` and `--fix <sha7>`; these choose whether the contributor runs, not output settings (see `commands/review-pr.md`).
 
 **Orchestrators pass overrides, not settings.** `review-dispatcher` and `engineering-pm` give every agent they dispatch a `Surface: github|session` line and, when the run has command flags, an `Output settings:` line holding only those flags (for example `Output settings: verbosity=terse min_priority=p1`). Each dispatched agent resolves the rest itself (`agents.<own-name>` > `surfaces.<surface>` > `output.<key>` > default), so `agents: { code-reviewer: detailed }` applies under `/review-pr` too. An orchestrator's own `agents.<name>` entry (say `review-dispatcher: terse`) governs only its own output.
 
@@ -84,7 +84,11 @@ The default is `p3`, which lists everything. It applies wherever findings are li
 | Work result (agents that change things or write docs) | `DONE`, `PARTIAL`, `BLOCKED`, `OWNER` (`pr-contributor` adds `STALE`) |
 | Principal review outcome | `APPROVE`, `APPROVE-PENDING`, `CHANGES`, `OWNER`, `SPLIT`, `BLOCK` |
 | Combined PR state (dispatcher) | `READY TO MERGE`, `CHANGES REQUESTED`, `BLOCKED`, `NOT READY (<reason>)`, `FIXING`, `IN REVIEW`, `DRAFT`, `MERGED`, `CLOSED UNMERGED` |
+| Contributor line (dispatcher summary and report) | `Contributor: dispatched round N`, `Contributor: not dispatched, <exact guard or flag>`, `Contributor: not dispatched, awaiting confirmation (CONFIRM BEFORE FIX)` (with `--confirm-fix`; the summary and report add the `Held:` line at every level, the report also the held items, the reviewed `sha7` and `/allstar-team:review-pr <n> --fix <sha7>`) |
+| Held line (dispatcher, `--confirm-fix`) | `Held: <role>:F<n>[, <role>:F<n>...] at <full SHA>` or `Held: gate <mode>[, <mode>] at <full SHA>`, where `<role>` is a reviewer's marker role (`[a-z0-9-]+`) and modes are `conflict`, `ci-failure` in that order; no job names. Items compare as a set. A plain `Held:` line is unreleased; it becomes `Held (released at Round N): …` once dispatched, `Held (superseded): …` when a newer hold at the same SHA replaces it. A line not matching this is rejected. |
 | Finding ids | `F1`, `F2`, never a bare `#1` (GitHub links it to issue 1) |
+
+**SHAs.** The full 40-character SHA is what is stored and compared; `sha7` is for display and typing only, and a typed `<sha7>` must match `^[0-9a-f]{7,40}$` and is normalized to the full SHA before any comparison or record.
 
 The token carries the meaning. With `emoji: true`, severities and owner decisions get a glyph (`🚨` Critical, `🔴` High, `🟡` Medium, `🟢` Low, `🚨 OWNER DECISION`). The `Verdict`, `Concern` and `Result` lines never carry a glyph, so they stay parseable.
 
@@ -149,7 +153,7 @@ These are specific to one agent, so they live in that agent's file. This table i
 | Agent and surface | Shape | `terse` | `standard` | `detailed` |
 |---|---|---|---|---|
 | `principal-engineer` review | Verdict outcome, why, validity, approach, scope, acceptance criteria, risks, owner decisions, evidence | Verdict, why, acceptance criteria if rewritten, owner decisions, risks needing a specialist, one evidence line | All fields | Adds alternatives considered and which of the issue's claims checked out or were stale |
-| `review-dispatcher` summary comment | State, roster, verdict table, required-before-merge, follow-ups, contributor line | State, verdict table, required-before-merge | Adds roster reasons, not-dispatched reasons, follow-ups, contributor line | Adds a digest of each reviewer's findings and the fix-loop history |
+| `review-dispatcher` summary comment | State, full head SHA, roster, verdict table, required-before-merge, follow-ups, contributor line (and `Held:` line when held) | State, full head SHA, verdict table, required-before-merge, contributor line (and `Held:` line when held) | Adds roster reasons, not-dispatched reasons, follow-ups | Adds a digest of each reviewer's findings and the fix-loop history |
 | `review-dispatcher` tracker comment | Living comment on the issue | State, SHA, round, latest History row | State, SHA, round, full History | Adds links to every comment and the gate results |
 | `engineering-pm` status report | Owner decisions, done, in progress, blocked, drift, open questions, next | One screen: decisions, blockers, next (what `standup` means) | Full shape | Adds evidence per item and the plan-versus-code drift detail (what `eod` means) |
 | `engineering-pm` alignment check of agent output | Review template, short form | Verdict and blocking items | Template | Template plus rationale |

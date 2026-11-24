@@ -31,7 +31,7 @@ Portable Claude Code agent roles. Stack-neutral: each agent reads the host proje
 | Command | What it does |
 |---|---|
 | `/allstar-team:work [focus]` | `engineering-pm` picks and dispatches the next unblocked, ready tasks |
-| `/allstar-team:review-pr <n> [--review-only]` | `review-dispatcher` reviews a PR; fixes it via `pr-contributor` unless `--review-only` |
+| `/allstar-team:review-pr <n> [--review-only] [--confirm-fix] [--fix <sha7>]` | `review-dispatcher` reviews a PR; fixes it via `pr-contributor` unless `--review-only`. `--confirm-fix` posts the reviews but holds the fix until you confirm; `--fix <sha7>` resumes a held fix if the head is still `<sha7>` |
 | `/allstar-team:status [standup\|eod\|focus]` | `engineering-pm` writes a status report |
 
 ## How the flow fits together

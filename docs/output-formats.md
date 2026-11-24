@@ -84,8 +84,11 @@ The default is `p3`, which lists everything. It applies wherever findings are li
 | Work result (agents that change things or write docs) | `DONE`, `PARTIAL`, `BLOCKED`, `OWNER` (`pr-contributor` adds `STALE`) |
 | Principal review outcome | `APPROVE`, `APPROVE-PENDING`, `CHANGES`, `OWNER`, `SPLIT`, `BLOCK` |
 | Combined PR state (dispatcher) | `READY TO MERGE`, `CHANGES REQUESTED`, `BLOCKED`, `NOT READY (<reason>)`, `FIXING`, `IN REVIEW`, `DRAFT`, `MERGED`, `CLOSED UNMERGED` |
-| Contributor line (dispatcher summary and report) | `Contributor: dispatched round N`, `Contributor: not dispatched, <exact guard or flag>`, `Contributor: not dispatched, awaiting confirmation (CONFIRM BEFORE FIX)` (with `--confirm-fix`; the summary adds `Held: <F-ids or gate mode> at <full SHA>` at every level, the report the held items, the reviewed `sha7` and `/allstar-team:review-pr <n> --fix <sha7>`) |
+| Contributor line (dispatcher summary and report) | `Contributor: dispatched round N`, `Contributor: not dispatched, <exact guard or flag>`, `Contributor: not dispatched, awaiting confirmation (CONFIRM BEFORE FIX)` (with `--confirm-fix`; the summary and report add the `Held:` line at every level, the report also the held items, the reviewed `sha7` and `/allstar-team:review-pr <n> --fix <sha7>`) |
+| Held line (dispatcher, `--confirm-fix`) | `Held: <role>:F<n>[, <role>:F<n>...] at <full SHA>`, `Held: gate conflict at <full SHA>` or `Held: gate ci-failure at <full SHA>`, where `<role>` is the reviewer's marker role; no job names. Marked `Held (released at Round N): …` once dispatched, `Held (superseded): …` when replaced at the same SHA. A line not matching this is rejected. |
 | Finding ids | `F1`, `F2`, never a bare `#1` (GitHub links it to issue 1) |
+
+**SHAs.** The full 40-character SHA is what is stored and compared; `sha7` is for display and typing only, and a typed `<sha7>` must match `^[0-9a-f]{7,40}$` and is normalized to the full SHA before any comparison or record.
 
 The token carries the meaning. With `emoji: true`, severities and owner decisions get a glyph (`🚨` Critical, `🔴` High, `🟡` Medium, `🟢` Low, `🚨 OWNER DECISION`). The `Verdict`, `Concern` and `Result` lines never carry a glyph, so they stay parseable.
 
@@ -150,7 +153,7 @@ These are specific to one agent, so they live in that agent's file. This table i
 | Agent and surface | Shape | `terse` | `standard` | `detailed` |
 |---|---|---|---|---|
 | `principal-engineer` review | Verdict outcome, why, validity, approach, scope, acceptance criteria, risks, owner decisions, evidence | Verdict, why, acceptance criteria if rewritten, owner decisions, risks needing a specialist, one evidence line | All fields | Adds alternatives considered and which of the issue's claims checked out or were stale |
-| `review-dispatcher` summary comment | State, full head SHA, roster, verdict table, required-before-merge, follow-ups, contributor line (and `Held:` line when held) | State, full head SHA, verdict table, required-before-merge, contributor line (and `Held:` line) | Adds roster reasons, not-dispatched reasons, follow-ups | Adds a digest of each reviewer's findings and the fix-loop history |
+| `review-dispatcher` summary comment | State, full head SHA, roster, verdict table, required-before-merge, follow-ups, contributor line (and `Held:` line when held) | State, full head SHA, verdict table, required-before-merge, contributor line (and `Held:` line when held) | Adds roster reasons, not-dispatched reasons, follow-ups | Adds a digest of each reviewer's findings and the fix-loop history |
 | `review-dispatcher` tracker comment | Living comment on the issue | State, SHA, round, latest History row | State, SHA, round, full History | Adds links to every comment and the gate results |
 | `engineering-pm` status report | Owner decisions, done, in progress, blocked, drift, open questions, next | One screen: decisions, blockers, next (what `standup` means) | Full shape | Adds evidence per item and the plan-versus-code drift detail (what `eod` means) |
 | `engineering-pm` alignment check of agent output | Review template, short form | Verdict and blocking items | Template | Template plus rationale |

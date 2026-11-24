@@ -84,7 +84,7 @@ The default is `p3`, which lists everything. It applies wherever findings are li
 | Work result (agents that change things or write docs) | `DONE`, `PARTIAL`, `BLOCKED`, `OWNER` (`pr-contributor` adds `STALE`) |
 | Principal review outcome | `APPROVE`, `APPROVE-PENDING`, `CHANGES`, `OWNER`, `SPLIT`, `BLOCK` |
 | Combined PR state (dispatcher) | `READY TO MERGE`, `CHANGES REQUESTED`, `BLOCKED`, `NOT READY (<reason>)`, `FIXING`, `IN REVIEW`, `DRAFT`, `MERGED`, `CLOSED UNMERGED` |
-| Contributor line (dispatcher summary and report) | `Contributor: dispatched round N`, `Contributor: not dispatched, <exact guard or flag>`, `Contributor: not dispatched, awaiting confirmation (CONFIRM BEFORE FIX)` (with `--confirm-fix`; the report adds the held items, the reviewed `sha7` and `/allstar-team:review-pr <n> --fix <sha7>`) |
+| Contributor line (dispatcher summary and report) | `Contributor: dispatched round N`, `Contributor: not dispatched, <exact guard or flag>`, `Contributor: not dispatched, awaiting confirmation (CONFIRM BEFORE FIX)` (with `--confirm-fix`; the summary adds `Held: <F-ids or gate mode> at <full SHA>` at every level, the report the held items, the reviewed `sha7` and `/allstar-team:review-pr <n> --fix <sha7>`) |
 | Finding ids | `F1`, `F2`, never a bare `#1` (GitHub links it to issue 1) |
 
 The token carries the meaning. With `emoji: true`, severities and owner decisions get a glyph (`🚨` Critical, `🔴` High, `🟡` Medium, `🟢` Low, `🚨 OWNER DECISION`). The `Verdict`, `Concern` and `Result` lines never carry a glyph, so they stay parseable.
@@ -150,7 +150,7 @@ These are specific to one agent, so they live in that agent's file. This table i
 | Agent and surface | Shape | `terse` | `standard` | `detailed` |
 |---|---|---|---|---|
 | `principal-engineer` review | Verdict outcome, why, validity, approach, scope, acceptance criteria, risks, owner decisions, evidence | Verdict, why, acceptance criteria if rewritten, owner decisions, risks needing a specialist, one evidence line | All fields | Adds alternatives considered and which of the issue's claims checked out or were stale |
-| `review-dispatcher` summary comment | State, roster, verdict table, required-before-merge, follow-ups, contributor line | State, verdict table, required-before-merge | Adds roster reasons, not-dispatched reasons, follow-ups, contributor line | Adds a digest of each reviewer's findings and the fix-loop history |
+| `review-dispatcher` summary comment | State, full head SHA, roster, verdict table, required-before-merge, follow-ups, contributor line (and `Held:` line when held) | State, full head SHA, verdict table, required-before-merge, contributor line (and `Held:` line) | Adds roster reasons, not-dispatched reasons, follow-ups | Adds a digest of each reviewer's findings and the fix-loop history |
 | `review-dispatcher` tracker comment | Living comment on the issue | State, SHA, round, latest History row | State, SHA, round, full History | Adds links to every comment and the gate results |
 | `engineering-pm` status report | Owner decisions, done, in progress, blocked, drift, open questions, next | One screen: decisions, blockers, next (what `standup` means) | Full shape | Adds evidence per item and the plan-versus-code drift detail (what `eod` means) |
 | `engineering-pm` alignment check of agent output | Review template, short form | Verdict and blocking items | Template | Template plus rationale |

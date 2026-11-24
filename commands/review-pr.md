@@ -15,7 +15,7 @@ Pass a flag only when the user typed it. The dispatcher will:
 
 1. Snapshot the PR with `gh`: state, head SHA, linked issue, CI, changed files, earlier agent comments.
 2. Triage from the diff and the issue's labels, then run in parallel: `code-reviewer` + `alignment-reviewer` always, and security, architecture, QA, docs and installed domain specialists as warranted. On a re-run it re-reviews only what the new commits affect.
-3. Post each reviewer's comment on the PR (verdict `APPROVE`/`CHANGES`/`BLOCK`, concern level, reviewed SHA) plus a dispatch summary, all at the same verbosity.
+3. Post each reviewer's comment on the PR (verdict `APPROVE`/`CHANGES`/`BLOCK`, concern level, reviewed SHA) plus a dispatch summary, each at its resolved verbosity (flags apply to all; per-agent config entries still apply).
 4. If changes are requested, run the fix loop: the contributor fixes the code items, then reviewers re-run.
 5. Update the linked issue: a living tracker comment, and label moves only if the project uses status labels.
 

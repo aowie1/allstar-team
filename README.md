@@ -56,8 +56,10 @@ Turn detail up or down with `.claude/allstar-team.yml` (copy [`allstar-team.exam
 output:
   verbosity: standard        # terse | standard | detailed
   surfaces: { session: standard, github: terse }   # where the output lands
-  agents: { code-reviewer: detailed }              # per agent
+  agents: { code-reviewer: detailed }              # per agent, also under /review-pr and /work
 ```
+
+Orchestrators pass dispatched agents only the run's command flags and the surface; each agent applies its own `agents.<name>` entry, and an orchestrator's entry governs only its own output.
 
 Set `min_priority: p1` to list only P0 (Critical) and P1 (High) findings; the rest are counted, not hidden silently, and verdicts still reflect them. Or per run: `/allstar-team:review-pr 42 --verbosity terse --min-priority p1`. Critical and High findings, owner decisions and the reviewed SHA are shown at every level; `p0` (hide High too) applies only to session output, never to PR comments. Settings come from the base branch's committed config, so a PR cannot change how it is reviewed. Full spec: [`docs/output-formats.md`](docs/output-formats.md). After editing a shared block, run `scripts/check-output-contract.sh`.
 

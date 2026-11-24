@@ -1,0 +1,31 @@
+# Copy to .claude/allstar-team.yml in your project. Every key is optional.
+# Spec: docs/output-formats.md
+output:
+  # Default detail for every agent.
+  #   terse    decisions and blocking facts only; Low findings counted, not listed
+  #   standard each finding with impact and fix (default)
+  #   detailed adds evidence, coverage, rationale and positives
+  verbosity: standard
+
+  # Override by where the output lands. Beats `verbosity`.
+  surfaces:
+    session: standard   # replies in the Claude Code session
+    github: standard    # PR and issue comments
+
+  # Override for one agent. Beats `surfaces`.
+  # agents:
+  #   code-reviewer: detailed
+  #   security-specialist: detailed
+  #   review-dispatcher: terse
+  #   engineering-pm: terse
+
+  # Lowest priority to list: p0 Critical, p1 High, p2 Medium, p3 Low (default: list all).
+  # p1 shows P0 and P1 only. Hidden findings are counted ("Not shown: 2 Medium"), and
+  # verdicts still reflect them. A surface or agent entry can be a map:
+  #   surfaces:
+  #     github: { verbosity: terse, min_priority: p1 }
+  min_priority: p3
+
+  emoji: true           # glyphs on severities and owner decisions; verdict lines stay plain
+  positives: auto       # auto = detailed only | on | off ("what's done well")
+  max_findings: 0       # 0 = no cap; N caps Medium and Low shown, never Critical or High

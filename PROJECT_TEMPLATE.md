@@ -41,6 +41,10 @@ The agents are stack-neutral. They learn a project from its own docs. Copy the s
 - Commit style: {conventional commits | other}
 ```
 
+## Output verbosity (optional)
+
+Agents default to `standard`. To change how much they write, copy `allstar-team.example.yml` to `.claude/allstar-team.yml` and set `output.verbosity` (`terse | standard | detailed`), per surface (`session`, `github`) or per agent. See `docs/output-formats.md`.
+
 ## Agents installed alongside
 
 List any project-specific specialists (frontend, backend, database, infra) in `.claude/agents/`. `engineering-pm` routes implementation to them when present, otherwise to `general-purpose`.

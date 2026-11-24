@@ -1,6 +1,6 @@
 {
   "name": "allstar-team",
   "description": "Portable engineering agent roles: code and alignment review, issue review, QA, documentation, system design, security, plus orchestration (PM, review dispatcher, PR contributor).",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": { "name": "randen" }
 }

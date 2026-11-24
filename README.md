@@ -46,6 +46,23 @@ issue ─▶ engineering-pm (triage) ─▶ principal-engineer (review) ─▶ r
 
 Nothing here approves or merges a PR. Owner decisions (new dependency, auth model, schema, payments, de-scoping) stop the workflow and are surfaced for a human.
 
+## Consistent output, tunable detail
+
+Every agent answers in the same shape: verdict or result first, numbered findings (`F1`, `F2`), then next steps. Reviewers share one review template and the verdicts `APPROVE | CHANGES | BLOCK`; PR comments carry a marker and the reviewed SHA.
+
+Turn detail up or down with `.claude/allstar-team.yml` (copy [`allstar-team.example.yml`](allstar-team.example.yml)):
+
+```yaml
+output:
+  verbosity: standard        # terse | standard | detailed
+  surfaces: { session: standard, github: terse }   # where the output lands
+  agents: { code-reviewer: detailed }              # per agent, also under /review-pr and /work
+```
+
+Orchestrators pass dispatched agents only the run's command flags and the surface; each agent applies its own `agents.<name>` entry, and an orchestrator's entry governs only its own output.
+
+Set `min_priority: p1` to list only P0 (Critical) and P1 (High) findings; the rest are counted, not hidden silently, and verdicts still reflect them. Or per run: `/allstar-team:review-pr 42 --verbosity terse --min-priority p1`. Critical and High findings, owner decisions and the reviewed SHA are shown at every level; `p0` (hide High too) applies only to session output, never to PR comments. Settings come from the base branch's committed config, so a PR cannot change how it is reviewed. Full spec: [`docs/output-formats.md`](docs/output-formats.md). After editing a shared block, run `scripts/check-output-contract.sh`.
+
 ## Install
 
 Via marketplace (from the pushed repo):
@@ -61,7 +78,7 @@ Local, for development:
 claude --plugin-dir /path/to/allstar-team
 ```
 
-Or copy `agents/*.md` and `commands/*.md` into a project's `.claude/`.
+Or copy `agents/*.md` and `commands/*.md` into a project's `.claude/`. Copy `allstar-team.example.yml` to `.claude/allstar-team.yml` to tune output.
 
 ## Per-project setup
 

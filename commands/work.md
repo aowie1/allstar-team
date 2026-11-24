@@ -1,11 +1,13 @@
 ---
 description: Identify and dispatch the next highest-priority work to specialist agents via engineering-pm
-argument-hint: Optional focus (e.g. "frontend", "unblock checkout", "all unblocked tasks")
+argument-hint: Optional focus and flags (e.g. "frontend", "unblock checkout --verbosity terse --min-priority p1")
 ---
 
 Use the `engineering-pm` agent to identify and dispatch the next highest-priority work.
 
 Focus (if provided): $ARGUMENTS
+
+Flag: `--verbosity terse|standard|detailed` → pass `Output settings: verbosity=<level>` for this run only; otherwise the project's `.claude/allstar-team.yml` decides (default `standard`). See `docs/output-formats.md`. `--min-priority p0|p1|p2|p3` sets the lowest priority listed (`p1` = Critical and High). The PM passes these flags and the surface to every agent it dispatches; each agent resolves the rest from the project config.
 
 The PM should:
 1. Read the project's docs and tracker to learn its process, labels and quality gates.

@@ -1,0 +1,11 @@
+{
+  "name": "allstar-team",
+  "owner": { "name": "randen" },
+  "plugins": [
+    {
+      "name": "allstar-team",
+      "source": "./",
+      "description": "Portable engineering agent roles."
+    }
+  ]
+}

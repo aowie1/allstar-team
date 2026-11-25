@@ -19,7 +19,10 @@ g -C "$primary" commit -q -m init
 g -C "$primary" worktree add -b feature "$tmp/linked"
 g -C "$primary" worktree add --detach "$tmp/detached"
 g init -q -b main "$tmp/other"
-mkdir -p "$tmp/norepo" "$tmp/nobin"
+mkdir -p "$tmp/norepo" "$tmp/nobin" "$tmp/oldgit"
+# A git < 2.31 stand-in: rev-parse echoes the unknown --path-format option and exits 0.
+printf '#!/bin/sh\nprintf "%%s\\n" --path-format=absolute .git .git\n' > "$tmp/oldgit/git"
+chmod +x "$tmp/oldgit/git"
 ln -s "$primary" "$tmp/link"
 P="$primary" L="$tmp/linked" N="$tmp/norepo"
 
@@ -113,6 +116,14 @@ check "gh -R o/r pr checkout"         deny  Bash "$P" "gh -R o/r pr checkout 12"
 check "gh pr merge --delete-branch"   deny  Bash "$P" "gh pr merge 12 --squash --delete-branch"
 check "gh pr merge -d"                deny  Bash "$P" "gh pr merge 12 -d"
 check "gh repo sync"                  deny  Bash "$P" "gh repo sync"
+check "heredoc body with odd quote"   deny  Bash "$P" $'git commit -F - <<\'EOF\'\nDon\'t break it\nEOF'
+check "comment with odd quote"        deny  Bash "$P" $'git status\ngit commit -m x  # don\'t'
+check "ANSI-C quoted message"         deny  Bash "$P" $'git commit -m $\'it\\\'s\''
+check "unparseable git log in primary" deny Bash "$P" "git log --grep \"it's"
+check "redirect glued to separator"   deny  Bash "$P" "git status;>f git commit -m x"
+check "cd -- primary && git add"      deny  Bash "$N" "cd -- $P && git add ."
+check "gh pr merge -sd cluster"       deny  Bash "$P" "gh pr merge 1 -sd"
+check "export GIT_DIR then commit"    deny  Bash "$N" "export GIT_DIR=$P/.git; git commit -m x"
 check "escape hatch inline ignored"   deny  Bash "$P" "ALLSTAR_ALLOW_PRIMARY=1 git commit -m x"
 check "escape hatch other value"      deny  Bash "$P" "git commit -m x" ALLSTAR_ALLOW_PRIMARY=0
 
@@ -129,7 +140,8 @@ check "git branch --contains/--merged" allow Bash "$P" "git branch --contains HE
 check "stash list / tag -l"           allow Bash "$P" "git stash list && git tag -l 'v*' && git tag"
 check "redirects in primary"          allow Bash "$P" "git branch 2>/dev/null; git status > $N/out 2>&1"
 check "quoted NL in primary log"      allow Bash "$P" $'git log --grep "a\ncommit"'
-check "gh pr merge without -d"        allow Bash "$P" "gh pr merge 12 --squash"
+check "gh pr merge without -d (merge policy is #10, not this hook)" allow Bash "$P" "gh pr merge 12 --squash"
+check "heredoc body skipped in primary" allow Bash "$P" $'git status <<\'EOF\'\ndon\'t\nEOF\ngit log -1'
 check "non-git command in primary"    allow Bash "$P" "ls -la"
 
 # Bash: allowed in a linked worktree
@@ -138,6 +150,9 @@ check "quoted multi-line -m in linked" allow Bash "$L" $'git commit -m "line one
 check "cd linked from primary"        allow Bash "$P" "cd $L && git commit -m x"
 check "git -C linked commit"          allow Bash "$P" "git -C $L commit -m x"
 check "gh pr checkout in linked"      allow Bash "$L" "gh pr checkout 12"
+check "heredoc commit in linked"      allow Bash "$L" $'git commit -m "$(cat <<\'EOF\'\nfix: it\'s fine\n\nbody line\nEOF\n)"'
+check "odd-quote git log in linked"   allow Bash "$L" "git log --grep \"it's"
+check "here-string in linked"         allow Bash "$L" "git commit -F - <<<'msg'"
 
 # Escape hatch from the hook's own environment
 check "escape hatch in env: Edit"     allow Edit "$P" "$P/sub/file.txt" ALLSTAR_ALLOW_PRIMARY=1
@@ -146,6 +161,7 @@ check "escape hatch in env: commit"   allow Bash "$P" "git commit -m x" ALLSTAR_
 # Fail open
 fail_open "malformed stdin" "not json"
 fail_open "git missing" '{"tool_name":"Edit","cwd":"/","tool_input":{"file_path":"'"$P"'/sub/file.txt"}}' PATH="$tmp/nobin"
+fail_open "git older than 2.31" '{"tool_name":"Edit","cwd":"/","tool_input":{"file_path":"'"$P"'/sub/file.txt"}}' PATH="$tmp/oldgit"
 
 if [ "$fails" -ne 0 ]; then
   echo "$fails failure(s)"; exit 1

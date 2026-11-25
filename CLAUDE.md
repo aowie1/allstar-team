@@ -27,10 +27,11 @@ The project hook `.claude/hooks/require-worktree.py`, wired in `.claude/settings
 
   Every other git subcommand is denied, and so is any global option other than `-C` and the pager/lock flags (so `-c`, `--git-dir`, `--work-tree` are denied), as well as an inline `GIT_DIR=`/`GIT_WORK_TREE=` prefix. The target is the session directory, adjusted for `cd`/`pushd <dir>` and `git -C <dir>`, plus any `--git-dir`/`--work-tree`.
 - `gh pr checkout`, `gh pr merge -d|--delete-branch` and `gh repo sync` are denied in a primary checkout.
-- The hook splits the command on `;`, `&&`, `||`, `|`, `&`, parentheses and newlines, and looks through `VAR=value`, `time`, `command`, `exec` and `nice` prefixes.
+- The hook skips heredoc bodies, splits the command on `;`, `&&`, `||`, `|`, `&`, parentheses and newlines, looks through `VAR=value`, `time`, `command`, `exec` and `nice` prefixes, and carries `export GIT_DIR=`/`GIT_WORK_TREE=` forward to later commands. `cd`/`pushd` options such as `--` are skipped.
+- If the command cannot be parsed (for example unbalanced quotes in a comment or in `$'...'`), it is denied when the session directory is a primary checkout and the command mentions `git` or `gh`, with a message asking you to split it or simplify its quoting. Otherwise it is allowed.
 - A primary checkout is a repo whose `git rev-parse --git-dir` equals its `--git-common-dir`, checked with every `GIT_*` variable removed from the environment.
 
-The hook needs `python3` and git 2.31 or later (`rev-parse --path-format=absolute`). It fails open: if it hits any internal error (malformed input, git missing, too old a git), it prints one line, `require-worktree: disabled (<reason>)`, to stderr and allows the call.
+The hook needs `python3` and git 2.31 or later (`rev-parse --path-format=absolute`). It fails open: if it hits any internal error (malformed hook input, git missing, or git older than 2.31, detected when `rev-parse` does not return absolute paths), it prints one line, `require-worktree: disabled (<reason>)`, to stderr and allows the call. An unparseable Bash command is not an internal error; it is handled as described above.
 
 ### Escape hatch: `ALLSTAR_ALLOW_PRIMARY=1`
 
@@ -45,8 +46,9 @@ The hook prevents accidents. It is not a security boundary. It inspects only Edi
 - non-git writes from Bash, such as `sed -i`, `>` redirects, `cp`, `rm` or scripts, and git's own file outputs such as `git diff --output=<file>`
 - git or gh run through another program or a nested shell: `bash -c`, `sh -c`, `eval`, `xargs`, `env`, `sudo`, `find -exec`, aliases and shell functions
 - command substitution and process substitution: backticks, `$(...)`, `<(...)`
-- `popd`, `cd -`, and a `cd` inside a `( ... )` subshell, which is treated as if it carried on after the subshell
-- `gh` commands other than the three listed above
+- `popd`, `cd -` (the directory is left unchanged), and a `cd` inside a `( ... )` subshell, which is treated as if it carried on after the subshell
+- an unparseable command whose session directory is not the primary checkout but that `cd`s into it or uses `git -C <primary>`
+- `gh` commands other than the three listed above (merge policy belongs to the plugin hook, #10)
 - a primary checkout reached through `GIT_DIR`/`GIT_WORK_TREE` set in the environment the session was started with (only an inline prefix on the command is caught)
 
 ## Checks

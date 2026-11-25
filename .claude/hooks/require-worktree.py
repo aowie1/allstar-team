@@ -52,6 +52,11 @@ SYMREF_READ_FLAGS = {"-q", "--quiet", "--short", "--recurse", "--no-recurse"}
 # Prefixes that run the next word as the command.
 WRAPPERS = {"time", "command", "exec", "nice"}
 ASSIGNMENT = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", re.S)
+PUNCT = set("();<>|&\n")
+# `<<EOF`, `<<-EOF`, `<< 'EOF'`, `<<"EOF"`, but not a `<<<` here-string.
+HEREDOC = re.compile(r"(?<!<)<<(?!<)-?[ \t]*(['\"]?)([A-Za-z0-9_.-]+)\1")
+GIT_OR_GH = re.compile(r"(^|[\s;&|(`])(git|gh)(\s|$)")
+SHORT_CLUSTER = re.compile(r"-[A-Za-z]+")
 
 
 def git_dirs(path):
@@ -70,11 +75,12 @@ def git_dirs(path):
         ["git", "-C", path, "rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
         capture_output=True, text=True, env=env,
     )
-    if r.returncode != 0 and "path-format" in r.stderr:
-        raise RuntimeError("git >= 2.31 is required for rev-parse --path-format")
     lines = r.stdout.split("\n")
     if r.returncode != 0 or len(lines) < 2:
         return None
+    if not (os.path.isabs(lines[0]) and os.path.isabs(lines[1])):
+        # git < 2.31 echoes the unknown --path-format option and exits 0.
+        raise RuntimeError("git >= 2.31 is required for rev-parse --path-format")
     return os.path.realpath(lines[0]), os.path.realpath(lines[1])
 
 
@@ -170,15 +176,30 @@ def gh_denied(args):
     words, rest = args[i:i + 2], args[i + 2:]
     if words == ["pr", "checkout"] or words == ["repo", "sync"]:
         return True
-    return words == ["pr", "merge"] and any(a in ("-d", "--delete-branch") for a in rest)
+    return words == ["pr", "merge"] and any(
+        a in ("-d", "--delete-branch") or (SHORT_CLUSTER.fullmatch(a) and "d" in a) for a in rest)
+
+
+def strip_heredocs(command):
+    """Drop heredoc bodies, which are data, not commands, and may hold unbalanced quotes."""
+    out, pending = [], []
+    for line in command.split("\n"):
+        if pending:
+            if line.strip() == pending[0]:
+                pending.pop(0)
+            continue
+        out.append(line)
+        pending += [m.group(2) for m in HEREDOC.finditer(line)]
+    return "\n".join(out)
 
 
 def segments(command):
     """Yield the argv of each simple command, split on ; & | ( ) and newlines.
 
     Redirections and their targets are dropped. Quoted newlines stay in one token.
+    Raises ValueError if the command cannot be tokenized.
     """
-    lex = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
+    lex = shlex.shlex(strip_heredocs(command), posix=True, punctuation_chars="();<>|&\n")
     lex.whitespace = " \t\r"
     lex.whitespace_split = True
     lex.commenters = ""
@@ -186,14 +207,15 @@ def segments(command):
     for tok in lex:
         if skip:
             skip = False
-        elif set(tok) <= set(";&|()\n"):
-            if seg:
-                yield seg
-            seg = []
-        elif set(tok) <= set("<>&"):
-            if seg and seg[-1].isdigit():
+        elif set(tok) <= PUNCT:
+            redirect = "<" in tok or ">" in tok
+            if not redirect or set(tok) & set(";|()\n"):
+                if seg:
+                    yield seg
+                seg = []
+            elif seg and seg[-1].isdigit():
                 seg.pop()  # fd number, as in 2>/dev/null
-            skip = True  # the redirect target (a file, or an fd after >&)
+            skip = redirect  # the redirect target (a file, or an fd after >&)
         else:
             seg.append(tok)
     if seg:
@@ -201,13 +223,21 @@ def segments(command):
 
 
 def check_bash(command, cwd):
-    """Return (target, description) for the first denied command, or None."""
+    """Return (root, command) for the first denied command, or None.
+
+    command is None when the whole command could not be parsed.
+    """
     try:
         segs = list(segments(command))
     except ValueError:
-        return None  # unbalanced quotes: the shell will reject it anyway
+        # Unparseable (odd quoting): deny git/gh from a primary checkout, allow the rest.
+        root = primary_root(cwd)
+        if root and GIT_OR_GH.search(command):
+            return root, None  # main() words the reason for this case
+        return None
+    exported = []  # GIT_DIR/GIT_WORK_TREE values from `export`, seen by later segments
     for argv in segs:
-        extra = []
+        extra = list(exported)
         while argv:
             m = ASSIGNMENT.fullmatch(argv[0])
             if m:
@@ -226,7 +256,18 @@ def check_bash(command, cwd):
             continue
         prog = os.path.basename(argv[0])
         if prog in ("cd", "pushd"):
-            cwd = resolve(cwd, argv[1] if len(argv) > 1 else "~")
+            args = argv[1:]
+            while args and args[0].startswith("-") and args[0] != "-":
+                args = args[1:]  # -L, -P, --
+            if not args:
+                cwd = resolve(cwd, "~")
+            elif args[0] != "-":  # `cd -` (previous dir) is unknown here: keep cwd
+                cwd = resolve(cwd, args[0])
+        elif prog == "export":
+            for a in argv[1:]:
+                m = ASSIGNMENT.fullmatch(a)
+                if m and m.group(1) in ("GIT_DIR", "GIT_WORK_TREE") and m.group(2):
+                    exported.append(m.group(2))
         elif prog == "git":
             targets, unsafe, sub, rest = parse_git(argv[1:], cwd)
             targets += [resolve(cwd, d) for d in extra]
@@ -259,7 +300,7 @@ def main():
     tool_input = data.get("tool_input") or {}
     cwd = data.get("cwd") or os.getcwd()
     if tool in ("Edit", "Write", "NotebookEdit"):
-        path = tool_input.get("notebook_path" if tool == "NotebookEdit" else "file_path")
+        path = tool_input.get("notebook_path") or tool_input.get("file_path")
         if not path:
             return
         path = resolve(cwd, path)
@@ -272,8 +313,11 @@ def main():
         hit = check_bash(tool_input.get("command") or "", cwd)
         if hit:
             root, cmd = hit
-            deny(f"require-worktree: `{cmd}` targets the primary checkout {root}, and this "
-                 f"command is not on the primary-checkout allowlist (see CLAUDE.md). "
+            what = (f"denied a git/gh command in the primary checkout {root} "
+                    f"(command could not be parsed; split it or simplify its quoting)" if cmd is None
+                    else f"`{cmd}` targets the primary checkout {root}, and this command is not "
+                         f"on the primary-checkout allowlist (see CLAUDE.md)")
+            deny(f"require-worktree: {what}. "
                  f"Do new work in a linked worktree instead. From {root} run: {SUGGESTION} "
                  f"and run the command there.")
 

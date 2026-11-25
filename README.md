@@ -31,7 +31,7 @@ Portable Claude Code agent roles. Stack-neutral: each agent reads the host proje
 | Command | What it does |
 |---|---|
 | `/allstar-team:work [focus]` | `engineering-pm` picks and dispatches the next unblocked, ready tasks |
-| `/allstar-team:review-pr <n> [--review-only] [--confirm-fix] [--fix <sha7>]` | `review-dispatcher` reviews a PR; fixes it via `pr-contributor` unless `--review-only`. `--confirm-fix` posts the reviews but holds the fix until you confirm; `--fix <sha7>` resumes a held fix if the head is still `<sha7>` |
+| `/allstar-team:review-pr <n> [--review-only] [--confirm-fix] [--fix <sha7>]` | `review-dispatcher` reviews a PR; fixes it via `pr-contributor` unless `--review-only`. `--confirm-fix` posts the reviews but holds the fix until you confirm; `--fix <sha7>` resumes a held fix if the head is still `<sha7>`. Fix mode and `--fix` need the plugin install plus `jq`; copied agents run review-only |
 | `/allstar-team:implement-fixes <n> [--dry-run] [--min-priority p0\|p1\|p2\|p3] [--skip <reviewer:Fn,...> --reason "<text>"]` | `review-dispatcher` applies the posted review findings you choose to your PR via `pr-contributor`, after read-only checks in `scripts/trusted-findings.sh` (trusted comments only, head unchanged since review, not a fork, round cap). Only the PR author may apply; anyone may `--dry-run`. Needs the plugin installed, not copied agents. Then `/allstar-team:review-pr <n> --review-only` |
 | `/allstar-team:status [standup\|eod\|focus]` | `engineering-pm` writes a status report |
 
@@ -79,7 +79,7 @@ Local, for development:
 claude --plugin-dir /path/to/allstar-team
 ```
 
-Or copy `agents/*.md` and `commands/*.md` into a project's `.claude/`. Copy `allstar-team.example.yml` to `.claude/allstar-team.yml` to tune output.
+Or copy `agents/*.md` and `commands/*.md` into a project's `.claude/`. Copied agents run **review-only**: fix mode, `--fix <sha7>` and `/allstar-team:implement-fixes` need the plugin install (they run the plugin's own `scripts/`) plus `jq`. Copy `allstar-team.example.yml` to `.claude/allstar-team.yml` to tune output.
 
 ## Per-project setup
 
@@ -87,6 +87,7 @@ See [`PROJECT_TEMPLATE.md`](PROJECT_TEMPLATE.md): a short block to paste into th
 
 ## Requirements
 
+- `gh`, `git` and `jq` on the `PATH`. The fix paths run read-only checks in `scripts/trusted-findings.sh` and `scripts/check-fix-scope.sh` (bash with `gh`, `jq` and `git`).
 - The orchestration agents use the `gh` CLI with the active account. Reads are enough for review; writes are needed for posting comments and for `pr-contributor` to push to PR branches.
 - The orchestrators dispatch other agents. If your Claude Code session does not let subagents spawn subagents, they stop after planning and return the roster and prompts for the main session to run.
 - Implementers (frontend, backend, database, infra) are stack-specific and not included. Add your own in the project's `.claude/agents/`; `engineering-pm` routes to them when present and falls back to `general-purpose`.

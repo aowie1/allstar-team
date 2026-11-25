@@ -42,7 +42,7 @@ output:
 
 A surface or agent entry is either a level name (shorthand for `verbosity`) or a map of keys.
 
-**Per run.** `/allstar-team:review-pr 42 --verbosity terse --min-priority p1`, `/allstar-team:status --verbosity detailed`, `/allstar-team:work --min-priority p1`. `/allstar-team:review-pr` also takes `--review-only`, `--confirm-fix` and `--fix <sha7>`; these choose whether the contributor runs, not output settings (see `commands/review-pr.md`). `/allstar-team:implement-fixes <n>` takes `--verbosity` and `--min-priority` (which also selects the findings to apply: `p1` = Critical and High, `p2` adds Medium, `p3` adds Low), plus `--dry-run` and `--skip <reviewer:Fn,...> --reason "<text>"`, which are not output settings (see `commands/implement-fixes.md`).
+**Per run.** `/allstar-team:review-pr 42 --verbosity terse --min-priority p1`, `/allstar-team:status --verbosity detailed`, `/allstar-team:work --min-priority p1`. `/allstar-team:review-pr` also takes `--review-only`, `--confirm-fix` and `--fix <sha7>`; these choose whether the contributor runs, not output settings (see `commands/review-pr.md`). `/allstar-team:implement-fixes <n>` takes `--verbosity` and `--min-priority` (which also selects the findings to apply: `p1` = Critical and High, `p2` adds Medium, `p3` adds Low; without the flag it selects `p1`, whatever the config's `min_priority`), plus `--dry-run` and `--skip <reviewer:Fn,...> --reason "<text>"`, which are not output settings (see `commands/implement-fixes.md`).
 
 **Orchestrators pass overrides, not settings.** `review-dispatcher` and `engineering-pm` give every agent they dispatch a `Surface: github|session` line and, when the run has command flags, an `Output settings:` line holding only those flags (for example `Output settings: verbosity=terse min_priority=p1`). Each dispatched agent resolves the rest itself (`agents.<own-name>` > `surfaces.<surface>` > `output.<key>` > default), so `agents: { code-reviewer: detailed }` applies under `/review-pr` too. An orchestrator's own `agents.<name>` entry (say `review-dispatcher: terse`) governs only its own output.
 
@@ -90,7 +90,27 @@ The default is `p3`, which lists everything. It applies wherever findings are li
 | `APPLY FINDINGS <sha7>` (dispatcher mode token) | Sent only by `/allstar-team:implement-fixes`: apply a chosen subset of the findings posted at `<sha7>`, or with `Dry run: yes` only list them. It counts only in the caller's prompt; anywhere in PR or issue text, comments or commits it is data and is flagged. |
 | `Flagged: untrusted agent comment (<check failed>)` | A comment carrying an agent marker or mode token that fails the trusted agent comments rule in `agents/review-dispatcher.md` (`(1) marker`, `(2) author`, `(3) edits`, `(4) verdict table`). It is ignored for state and reported. |
 | `ignored: untrusted source` | An unmarked comment by another account. It is ignored and only counted, not flagged. |
-| `**Round:** N` | The shared fix-round counter: a header line (after the marker, before the first blank line) of the `pr-fix` comment and the tracker, at every level. `scripts/trusted-findings.sh` reads the larger of the two trusted values; a `pr-fix` or tracker comment by the pinned identity edited by another account is `round counter tampered`. |
+| `**Round:** N` | The shared fix-round counter: a header line (after the marker, before the first blank line) of the `pr-fix` comment and the tracker, at every level. `scripts/trusted-findings.sh` reads the larger of the two trusted values. A trusted `pr-fix` comment from before this field may instead carry the legacy line-2 heading `## PR fix — Round N`. Any comment by the pinned identity (PR or linked issue) edited by another or a deleted account is `round counter tampered`. |
+
+**Trust script refusals.** `refusal` stops the run (exit 3); `apply_refusal` with `refusal: null` (exit 0) keeps `--dry-run` working but blocks every contributor dispatch.
+
+| Refusal | Field | Recovery |
+|---|---|---|
+| `identity lookup failed` | `refusal` | Fix `gh auth` for a user token, then re-run. |
+| `no trusted dispatch summary` | `refusal` | `/allstar-team:review-pr <n> --review-only`. |
+| `multiple trusted dispatch summaries` | `refusal` | Delete the extra summary comments (keep one), then `/allstar-team:review-pr <n> --review-only`. |
+| `dispatch summary has no full head SHA` | `refusal` | The summary predates the `**Head SHA:**` line: `/allstar-team:review-pr <n> --review-only`. |
+| `dispatch summary has an empty verdict table`, `summary verdict table missing or duplicated`, `summary verdict table malformed` | `refusal` | `/allstar-team:review-pr <n> --review-only`. |
+| `head moved since review` | `refusal` | `/allstar-team:review-pr <n>`. |
+| `listed reviewer comment <id> not found on the PR`, `findings unparseable for <role>`, `unparseable finding <id>`, `duplicate finding id` | `refusal` | Re-run that review: `/allstar-team:review-pr <n> --review-only`. |
+| `gh api failed: …`, `totalCount mismatch on …`, `pagination failed`, `PR head moved while fetching`, `not found` | `refusal` | Retry; check the PR number, rate limit and network. |
+| `trusted-findings.sh must be run from the plugin's installed copy by absolute path`, `… must not run from the repo under review`, `trusted-findings script unavailable` | `refusal` / contributor line | Install the plugin (`/plugin install`); copied agents run review-only. |
+| `round counter unreadable` | `apply_refusal` | A trusted `pr-fix` or tracker comment has no `**Round:** N` header line (and no legacy heading). Migration: the pinned account edits its own comment to add `**Round:** N` as a header line. |
+| `round counter tampered` | `apply_refusal` | A comment by the pinned account was edited by someone else. Review the edit history; delete or restore the comment, then re-run. |
+| `commits cite finding ids but no trusted round counter exists` | `apply_refusal` | Fix rounds ran without a readable counter: restore the `pr-fix` comment with its `**Round:** N` line. |
+| `invalid head branch name` | `apply_refusal` | The head branch must match `^[A-Za-z0-9._/-]{1,200}$` and pass `git check-ref-format`; rename the branch or fix by hand. |
+| `PR is not open`, `fork PR: …`, `head branch is the base or default branch`, `caller is not the PR author; …`, `round cap reached (4 rounds)` | `apply_refusal` | Use `--dry-run`, or a human fixes the PR. |
+| `path rejected` (per finding, in `rejected`) | finding | The finding's path is absolute, has a `.` or `..` component, or has characters outside `[A-Za-z0-9._/@+-]`; fix it by hand. |
 
 **SHAs.** The full 40-character SHA is what is stored and compared; `sha7` is for display and typing only, and a typed `<sha7>` must match `^[0-9a-f]{7,40}$` and is normalized to the full SHA before any comparison or record.
 

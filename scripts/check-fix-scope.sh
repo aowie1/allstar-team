@@ -6,19 +6,22 @@
 # <allowed-json> is a file holding {"paths": [...], "test_globs": [...]}:
 #   paths       repo-relative paths the fix may touch (the findings' paths and the files already in
 #               the PR diff), matched literally and case-sensitively;
-#   test_globs  patterns for test files of those, using '*' only (matches across '/'), each holding
-#               a test marker (.test. .spec. _test. /tests/), for example "src/*.test.ts".
+#   test_globs  patterns for test files of those, using '*' only (matches across '/'), each starting
+#               with the directory of one of the paths (no leading '*') and holding a test marker
+#               (.test. .spec. _test. a test/ tests/ __tests__/ spec/ directory, or a test_ file
+#               prefix), for example "src/*.test.ts" or "tests/test_*.py".
 #
 # Checks every change in <dispatched-sha>..HEAD and exits non-zero on any path that is out of
 # scope or on the OWNER list below (case-insensitive; the OWNER list wins over <allowed-json>),
 # a rename or copy where either side fails, an absolute, '.' or '..' path, a control or non-ASCII
 # byte, a mode change, a new executable file, a symlink (120000) or submodule (160000), or a HEAD
 # that does not descend from <dispatched-sha>. Non-zero means BLOCKED: push nothing. On success,
-# push exactly the printed checked_sha: git push origin <checked_sha>:refs/heads/<head branch>.
+# push exactly the printed checked_sha: git push origin '<checked_sha>:refs/heads/<head branch>'.
 #
 # This file is the single source of the OWNER path list (pr-contributor points here).
 #
-# Exit status: 0 in scope; 4 violations or git failure; 2 bad input. JSON is printed on stdout.
+# Exit status: 0 in scope; 4 violations or git failure; 2 bad input; 1 internal error (as in
+# trusted-findings.sh). JSON is printed on stdout; checked_sha is "" unless ok is true.
 # Read-only: runs git read commands only. Run it only from the plugin's installed copy.
 set -euo pipefail
 export LC_ALL=C
@@ -29,8 +32,8 @@ on_exit() {
   local rc=$?
   rm -rf "$tmp"
   if [[ $emitted -eq 0 ]]; then
-    printf '%s\n' '{"ok":false,"checked_sha":null,"violations":[{"path":null,"reason":"internal error"}]}'
-    exit 4
+    printf '%s\n' '{"ok":false,"checked_sha":"","violations":[{"path":null,"reason":"internal error"}]}'
+    exit 1
   fi
   exit "$rc"
 }
@@ -40,7 +43,7 @@ checked=""
 emit() { # emit <ok> <violations-json> <exit>
   local o
   o="$(jq -n --argjson ok "$1" --argjson v "$2" --arg c "$checked" \
-    '{ok: $ok, checked_sha: (if $c == "" then null else $c end), violations: $v}')"
+    '{ok: $ok, checked_sha: (if $ok then $c else "" end), violations: $v}')"
   printf '%s\n' "$o"
   emitted=1
   exit "$3"
@@ -53,12 +56,18 @@ ffile() { case "$1" in /*) printf '%s' "$1" ;; *) printf './%s' "$1" ;; esac; } 
 wt="$(ffile "$1")" sha="$2" allowed_file="$(ffile "$3")"
 [[ -d $wt ]] || bad_input "worktree not found"
 
-# Location (SR-F10): absolute, and not inside the repo under review or the PR worktree.
+# Location (SR-F10, AR-F14): absolute, and not inside the repo under review, the PR worktree, or
+# any linked worktree of them (same git common dir). <config dir>/plugins/ is always accepted.
 case "$0" in /*) ;; *) bad_input "run from the plugin's installed copy by absolute path" ;; esac
 self="$(realpath -- "$0")"
-if [[ $self != "$HOME/.claude/plugins/"* ]]; then
+if [[ $self != "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/"* ]]; then
+  mine="$(git -C "$(dirname -- "$self")" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
   for d in . "$wt"; do
     if top="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" && [[ -n $top && $self == "$(realpath -- "$top")/"* ]]; then
+      bad_input "check-fix-scope.sh must not run from the repo under review or the PR worktree"
+    fi
+    if [[ -n $mine ]] && theirs="$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+      && [[ "$(realpath -- "$mine")" == "$(realpath -- "$theirs")" ]]; then
       bad_input "check-fix-scope.sh must not run from the repo under review or the PR worktree"
     fi
   done
@@ -73,21 +82,31 @@ jq -e 'type == "object" and (keys - ["paths", "test_globs"] | length == 0)
 git -C "$wt" rev-parse --verify --quiet "$sha^{commit}" >/dev/null || bad_input "dispatched SHA not in worktree"
 checked="$(git -C "$wt" rev-parse --verify HEAD)"
 
-valid_path() { # a repo-relative path with no glob, '.', '..', control or non-ASCII characters
-  [[ $1 =~ ^[A-Za-z0-9._/@+-]+$ && $1 != /* && $1 != *//* && /$1/ != */./* && /$1/ != */../* ]]
+valid_path() { # a repo-relative path with no glob, '.', '..', leading '-', control or non-ASCII characters
+  [[ $1 =~ ^[A-Za-z0-9._/@+-]+$ && $1 != /* && $1 != *//* && /$1/ != */./* && /$1/ != */../* && /$1 != */-* ]]
 }
 
 allowed=()
+dirs=()
 while IFS= read -r a; do
-  valid_path "$a" || bad_input "allowed path rejected: must be repo-relative, no glob, '.' or '..'"
+  valid_path "$a" || bad_input "allowed path rejected: must be repo-relative, no glob, '.', '..' or leading '-'"
   allowed+=("$a")
+  if [[ $a == */* ]]; then dirs+=("${a%/*}/"); else dirs+=(""); fi
 done < <(jq -r '(.paths // [])[]' "$allowed_file")
 globs=()
 while IFS= read -r g; do
-  [[ $g =~ ^[A-Za-z0-9._/*-]+$ && $g != '*' && $g != '**' && $g != /* && /$g/ != */../* && /$g/ != */./* ]] \
-    || bad_input "test glob rejected: only letters, digits, . _ / - and *"
-  [[ $g == *.test.* || $g == *.spec.* || $g == *_test.* || $g == */tests/* ]] \
-    || bad_input "test glob rejected: needs a test marker (.test. .spec. _test. /tests/)"
+  [[ $g =~ ^[A-Za-z0-9._/*-]+$ && $g != /* && $g != \** && /$g/ != */../* && /$g/ != */./* && /$g != */-* ]] \
+    || bad_input "test glob rejected: only letters, digits, . _ / - and *, no leading '*' or '-'"
+  # SR-F16: the glob starts with the directory of one of the allowed paths.
+  in_dir=0
+  for d in "${dirs[@]}"; do
+    if [[ $g == "$d"* ]]; then in_dir=1; break; fi
+  done
+  [[ $in_dir -eq 1 ]] || bad_input "test glob rejected: must start with the directory of an allowed path"
+  # CR-F12: markers checked against "/<glob>", so a root tests/ directory counts.
+  [[ /$g == *.test.* || /$g == *.spec.* || /$g == *_test.* || /$g == */test/* || /$g == */tests/* \
+    || /$g == */__tests__/* || /$g == */spec/* || ${g##*/} == test_* ]] \
+    || bad_input "test glob rejected: needs a test marker (.test. .spec. _test. test/ tests/ __tests__/ spec/ or test_ prefix)"
   globs+=("$g")
 done < <(jq -r '(.test_globs // [])[]' "$allowed_file")
 
@@ -95,9 +114,12 @@ done < <(jq -r '(.test_globs // [])[]' "$allowed_file")
 # Directories, matched at the root or nested:
 owner_dirs=(.github .gitlab .circleci .buildkite .woodpecker .gitea/workflows .forgejo/workflows
   .claude .claude-plugin .husky .githooks .vscode .devcontainer .cursor .yarn migrations supabase)
-# Plugin definitions, at the root, only when the repo is a Claude Code plugin (AR-F4):
+# Plugin definitions, at the root, only when the repo is a Claude Code plugin (AR-F4): the
+# manifest exists at the dispatched SHA, or anywhere in its history or any fetched ref, including
+# the base branch (SR-F17), so a PR that deletes it does not switch the rule off.
 owner_root_dirs=()
-if git -C "$wt" cat-file -e "$sha:.claude-plugin/plugin.json" 2>/dev/null; then
+if git -C "$wt" cat-file -e "$sha:.claude-plugin/plugin.json" 2>/dev/null \
+  || [[ -n "$(git -C "$wt" log --all --format=%H -1 -- .claude-plugin/plugin.json 2>/dev/null)" ]]; then
   owner_root_dirs=(agents commands skills hooks)
 fi
 # Exact repo-relative paths:

@@ -30,7 +30,7 @@ on_exit() {
     if [[ $mode == check ]]; then
       printf '%s\n' '{"ok":false,"refusal":"internal error"}'
     else
-      printf '%s\n' '{"head_sha":null,"head_branch":null,"round":null,"findings":[],"rejected":[],"not_shown":{},"ignored":[],"flagged":[],"refusal":"internal error","viewer":null,"pr_author":null,"can_apply":false,"apply_refusal":"internal error","base_branch":null,"default_branch":null,"tracker_comment_id":null,"pr_fix_comment_id":null}'
+      printf '%s\n' '{"head_sha":null,"head_branch":null,"branch_ok":false,"round":null,"findings":[],"rejected":[],"not_shown":{},"ignored":[],"flagged":[],"refusal":"internal error","viewer":null,"pr_author":null,"can_apply":false,"apply_refusal":"internal error","base_branch":null,"default_branch":null,"tracker_comment_id":null,"pr_fix_comment_id":null}'
     fi
     exit 1
   fi
@@ -45,7 +45,7 @@ refuse() { # refuse <reason>: print the full output shape with a refusal, exit 3
   o="$(jq -n --arg r "$1" --arg viewer "$viewer" --arg author "$pr_author" --arg head "$head_sha" \
     --arg branch "$head_branch" --arg base "$base_branch" --arg def "$default_branch" --arg round "$round" '
     def n: if . == "" then null else . end;
-    {head_sha: ($head|n), head_branch: ($branch|n),
+    {head_sha: ($head|n), head_branch: ($branch|n), branch_ok: false,
      round: (if $round == "" then null else ($round|tonumber) end),
      findings: [], rejected: [], not_shown: {}, ignored: [], flagged: [], refusal: $r,
      viewer: ($viewer|n), pr_author: ($author|n), can_apply: false, apply_refusal: $r,
@@ -65,15 +65,20 @@ check_fail() { # check_fail <reason>: refusal for the --check-* modes
 
 fail() { if [[ $mode == check ]]; then check_fail "$1"; else refuse "$1"; fi; }
 
-# Location (spec L1, SR-F10): an absolute path, and not inside the repo the caller is working in.
-# A marketplace install lives under ~/.claude/plugins/; a --plugin-dir development checkout is
-# accepted when it is outside the current repo.
+# Location (spec L1, SR-F10, AR-F14): an absolute path, and not from the repo the caller is
+# working in or any linked worktree of it (same git common dir). A marketplace install lives
+# under <config dir>/plugins/; a --plugin-dir development checkout of another repo is accepted.
 self_check() {
-  local self top
+  local self top mine theirs
   case "$0" in /*) ;; *) fail "trusted-findings.sh must be run from the plugin's installed copy by absolute path" ;; esac
   self="$(realpath -- "$0")"
-  [[ $self == "$HOME/.claude/plugins/"* ]] && return 0
+  [[ $self == "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/"* ]] && return 0
   if top="$(git rev-parse --show-toplevel 2>/dev/null)" && [[ -n $top && $self == "$(realpath -- "$top")/"* ]]; then
+    fail "trusted-findings.sh must not run from the repo under review"
+  fi
+  if mine="$(git -C "$(dirname -- "$self")" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    && theirs="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
+    && [[ "$(realpath -- "$mine")" == "$(realpath -- "$theirs")" ]]; then
     fail "trusted-findings.sh must not run from the repo under review"
   fi
 }
@@ -186,7 +191,7 @@ input_value() { # print $tmp/in without one trailing newline
 }
 
 check_reason() {
-  local s low prev t re
+  local s low re sep tok colon
   read_stdin
   s="$(input_value)"
   # NFKC is not available in bash/jq. Rejecting every byte outside this ASCII set is stricter:
@@ -195,19 +200,13 @@ check_reason() {
   [[ $s =~ $re ]] || check_fail "reason must be 1-200 characters from A-Z a-z 0-9 space and . , ; : ' ( ) / _ + = ? ! -"
   [[ $s =~ [A-Za-z0-9] ]] || check_fail "reason must contain a letter or digit"
   low="${s,,}"
-  prev=""
-  while [[ $low != "$prev" ]]; do
-    prev="$low"
-    low="${low//  / }"
-    low="${low// :/:}"
-    low="${low//: /:}"
-    low="${low// -/-}"
-    low="${low//- /-}"
-  done
-  for t in 'review only' 'confirm before fix' 'fix confirmed' 'apply findings' 'confirmed fix at' \
-    'agent:' 'round:' 'dry run:' 'held:' 'head branch' 'base branch' 'skip ids' 'output settings' '://'; do
-    [[ $low != *"$t"* ]] || check_fail "reason contains a reserved token"
-  done
+  # CR-F7: tokens at a word start, with any run of separators inside them or before a colon.
+  sep='[ _.-]*'
+  tok="(^|[^a-z])(review${sep}only|confirm${sep}before${sep}fix|fix${sep}confirmed|apply${sep}findings|confirmed${sep}fix${sep}at|head${sep}branch|base${sep}branch|skip${sep}ids|output${sep}settings)"
+  colon="(^|[^a-z])(round|agent|held|dry${sep}run)[^a-z0-9]*:"
+  if [[ $low =~ $tok || $low =~ $colon || $low == *'://'* ]]; then
+    check_fail "reason contains a reserved token"
+  fi
   local o
   o="$(jq -n --arg r "$s" '{ok: true, reason: $r}')"
   printf '%s\n' "$o"
@@ -323,7 +322,7 @@ def flag($check): {comment_id: .databaseId, source: src, marker: (if marked then
 def rank: {"Critical": 4, "High": 3, "Medium": 2, "Low": 1, "None": 0}[.];
 # SR-F3: a finding path the contributor may act on.
 def bad_path: (test("^[A-Za-z0-9._/@+-]+$") | not) or startswith("/") or contains("//")
-              or (("/" + . + "/") | test("/\\.{1,2}/"));
+              or (("/" + . + "/") | test("/\\.{1,2}/")) or (("/" + .) | contains("/-"));
 # Round field: the **Round:** header line, else (legacy pr-fix only) a line-2 heading.
 def round_value($legacy):
   header_values("^\\*\\*Round:\\*\\* (?<v>[0-9]{1,3})$") as $h
@@ -352,7 +351,9 @@ def parse_finding($role; $cid; $sha):
   | (first($segs[] | gsub("^[^A-Za-z]+"; "") | select(IN("Critical", "High", "Medium", "Low"))) // null) as $sev
   | (any($segs[]; ascii_downcase == "resolved")) as $resolved
   | (first($segs[] | capture("^`(?<l>[^`]+)`$") | .l) // null) as $loc
+  # CR-F14: "docs/x.md § Section" names a file and a section, not a line.
   | (if $loc == null then {path: null, line: null}
+     elif ($loc | contains("§")) then {path: ($loc | split("§")[0] | gsub("^\\s+|\\s+$"; "") | if . == "" then null else . end), line: null}
      else ($loc | capture("^(?<p>[^:]+):(?<ln>[0-9]+)") | {path: .p, line: (.ln | tonumber)}) // {path: $loc, line: null}
      end) as $pl
   | (first($blk[] | capture("\\*\\*Fix:\\*\\*\\s*(?<f>.*)$") | .f
@@ -447,7 +448,8 @@ $meta[0] as $p | $cs[0] as $cs | $ts[0] as $ts | $commits[0] as $commits
               # CR-F3: what was parsed must account for the concern the summary recorded.
               | (([$fs[].severity] + ($ns // {} | keys)) | map(rank) | max // 0) as $top
               | if $top != ($r.concern | rank) then error("findings unparseable for \($r.role)") else . end
-              | .findings += [$fs[] | select(.path == null or (.path | bad_path | not))]
+              | .findings += [$fs[] | select(.path != null and (.path | bad_path | not))]
+              | .rejected += [$fs[] | select(.path == null) | {id, path, reason: "no file path"}]
               | .rejected += [$fs[] | select(.path != null and (.path | bad_path)) | {id, path, reason: "path rejected"}]
               | if $ns then .not_shown[$r.role] = $ns else . end
             end)
@@ -457,9 +459,10 @@ $meta[0] as $p | $cs[0] as $cs | $ts[0] as $ts | $commits[0] as $commits
   end
 
 # Apply guards (D1, D3, D4, S-F12, round cap, M2).
+| .branch_ok = $branch_ok
 | .apply_refusal = (
-    if .refusal then .refusal
-    elif .counter then .counter
+    if .counter then .counter
+    elif .refusal then .refusal
     elif $p.state != "OPEN" then "PR is not open"
     elif $p.isCrossRepository then "fork PR: never push to a fork; use --dry-run"
     elif ($branch_ok | not) then "invalid head branch name"
@@ -469,7 +472,7 @@ $meta[0] as $p | $cs[0] as $cs | $ts[0] as $ts | $commits[0] as $commits
     else null end)
 | .can_apply = (.apply_refusal == null)
 | if .refusal then .findings = [] | .rejected = [] | .not_shown = {} else . end
-| {head_sha, head_branch, round, findings, rejected, not_shown, ignored, flagged, refusal,
+| {head_sha, head_branch, branch_ok, round, findings, rejected, not_shown, ignored, flagged, refusal,
    viewer, pr_author, can_apply, apply_refusal, base_branch, default_branch,
    tracker_comment_id, pr_fix_comment_id}
 JQ

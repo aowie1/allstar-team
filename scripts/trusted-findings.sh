@@ -30,7 +30,7 @@ on_exit() {
     if [[ $mode == check ]]; then
       printf '%s\n' '{"ok":false,"refusal":"internal error"}'
     else
-      printf '%s\n' '{"head_sha":null,"head_branch":null,"branch_ok":false,"round":null,"findings":[],"rejected":[],"not_shown":{},"ignored":[],"flagged":[],"refusal":"internal error","viewer":null,"pr_author":null,"can_apply":false,"apply_refusal":"internal error","base_branch":null,"default_branch":null,"tracker_comment_id":null,"pr_fix_comment_id":null}'
+      printf '%s\n' '{"head_sha":null,"head_branch":null,"branch_ok":false,"round":null,"findings":[],"rejected":[],"not_shown":{},"ignored":[],"flagged":[],"refusal":"internal error","viewer":null,"pr_author":null,"is_author":false,"can_apply":false,"apply_refusal":"internal error","base_branch":null,"default_branch":null,"tracker_comment_id":null,"pr_fix_comment_id":null}'
     fi
     exit 1
   fi
@@ -48,7 +48,9 @@ refuse() { # refuse <reason>: print the full output shape with a refusal, exit 3
     {head_sha: ($head|n), head_branch: ($branch|n), branch_ok: false,
      round: (if $round == "" then null else ($round|tonumber) end),
      findings: [], rejected: [], not_shown: {}, ignored: [], flagged: [], refusal: $r,
-     viewer: ($viewer|n), pr_author: ($author|n), can_apply: false, apply_refusal: $r,
+     viewer: ($viewer|n), pr_author: ($author|n),
+     is_author: ($viewer != "" and $author != "" and $viewer == $author),
+     can_apply: false, apply_refusal: $r,
      base_branch: ($base|n), default_branch: ($def|n), tracker_comment_id: null, pr_fix_comment_id: null}')"
   printf '%s\n' "$o"
   emitted=1
@@ -467,6 +469,8 @@ $meta[0] as $p | $cs[0] as $cs | $ts[0] as $ts | $commits[0] as $commits
 
 # Apply guards (D1, D3, D4, S-F12, round cap, M2).
 | .branch_ok = $branch_ok
+# #13 F1: the caller authored the PR. Independent of refusal and apply_refusal.
+| .is_author = ($viewer != "" and .pr_author != null and .pr_author == $viewer)
 | .apply_refusal = (
     if .counter then .counter
     elif .refusal then .refusal
@@ -474,13 +478,13 @@ $meta[0] as $p | $cs[0] as $cs | $ts[0] as $ts | $commits[0] as $commits
     elif $p.isCrossRepository then "fork PR: never push to a fork; use --dry-run"
     elif ($branch_ok | not) then "invalid head branch name"
     elif .head_branch == .base_branch or .head_branch == .default_branch then "head branch is the base or default branch"
-    elif .pr_author == null or .pr_author != .viewer then "caller is not the PR author; only --dry-run is allowed"
+    elif .is_author | not then "only the PR author may apply fixes"
     elif .round >= 4 then "round cap reached (4 rounds)"
     else null end)
 | .can_apply = (.apply_refusal == null)
 | if .refusal then .findings = [] | .rejected = [] | .not_shown = {} else . end
 | {head_sha, head_branch, branch_ok, round, findings, rejected, not_shown, ignored, flagged, refusal,
-   viewer, pr_author, can_apply, apply_refusal, base_branch, default_branch,
+   viewer, pr_author, is_author, can_apply, apply_refusal, base_branch, default_branch,
    tracker_comment_id, pr_fix_comment_id}
 JQ
   cat "$tmp/out.json"

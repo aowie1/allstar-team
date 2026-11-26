@@ -37,7 +37,7 @@ Relay the dispatcher's report. It opens with the result, then: implemented (with
 
 - `no trusted dispatch summary` → `/allstar-team:review-pr <n> --review-only`
 - `head moved since review` → `/allstar-team:review-pr <n>`
-- `caller is not the PR author`, or a fork PR → `--dry-run`
+- `only the PR author may apply fixes`, or a fork PR → `--dry-run`
 - After fixes land → `/allstar-team:review-pr <n> --review-only`. A skipped finding stays open, so a later default `review-pr` run in fix mode may still fix it (v1 limitation).
 
 Applying runs the PR's own build, tests and hooks on this machine and pushes commits to the PR branch as you.

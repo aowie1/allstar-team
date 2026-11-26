@@ -1,15 +1,28 @@
 #!/usr/bin/env bash
 # check-fix-scope.sh: pre-push scope check for pr-contributor in APPLY FINDINGS mode (issue #4, M3).
 #
-#   check-fix-scope.sh <worktree> <dispatched-sha> <allowed-json>
+#   check-fix-scope.sh [--base <base branch>] <worktree> <dispatched-sha> <allowed-json>
+#
+# This header is the single source of the scope rules: the OWNER path list (below) and the
+# allowed-json and test-glob rules (here). pr-contributor points here instead of repeating them.
 #
 # <allowed-json> is a file holding {"paths": [...], "test_globs": [...]}:
-#   paths       repo-relative paths the fix may touch (the findings' paths and the files already in
-#               the PR diff), matched literally and case-sensitively;
-#   test_globs  patterns for test files of those, using '*' only (matches across '/'), each starting
-#               with the directory of one of the paths (no leading '*') and holding a test marker
-#               (.test. .spec. _test. a test/ tests/ __tests__/ spec/ directory, or a test_ file
-#               prefix), for example "src/*.test.ts" or "tests/test_*.py".
+#   paths       repo-relative paths the fix may touch: the findings' paths and the files already
+#               in the PR diff. Matched literally and case-sensitively. Each must use only
+#               A-Z a-z 0-9 . _ / @ + -, with no '.', '..' or '-'-leading component.
+#   test_globs  patterns for the test files of those paths. Rules, all required:
+#               - only A-Z a-z 0-9 . _ / - and '*' ('*' matches across '/'); no leading '*' or '-';
+#                 no '.' or '..' component;
+#               - starts with a test-glob root: the directory of a nested allowed path (src/ for
+#                 src/a.py), or one of the root test directories tests/ test/ spec/ __tests__/.
+#                 Root-level allowed paths (README.md) add no root of their own;
+#               - holds a test marker: .test. .spec. _test. a test/ tests/ __tests__/ spec/
+#                 directory, or a test_ file-name prefix;
+#               - does not name a test-bootstrap file (conftest.py, pytest.ini, jest.setup.*,
+#                 jest.config.*, setupTests.*, vitest.setup.*, vitest.config.*). Bootstrap files
+#                 are never allowed through a glob, at any depth, even when they carry a marker.
+#               Examples: "src/*.test.ts", "tests/test_*.py".
+# --base names the PR's base branch; origin/<base> then also decides the plugin rule (below).
 #
 # Checks every change in <dispatched-sha>..HEAD and exits non-zero on any path that is out of
 # scope or on the OWNER list below (case-insensitive; the OWNER list wins over <allowed-json>),
@@ -17,8 +30,6 @@
 # byte, a mode change, a new executable file, a symlink (120000) or submodule (160000), or a HEAD
 # that does not descend from <dispatched-sha>. Non-zero means BLOCKED: push nothing. On success,
 # push exactly the printed checked_sha: git push origin '<checked_sha>:refs/heads/<head branch>'.
-#
-# This file is the single source of the OWNER path list (pr-contributor points here).
 #
 # Exit status: 0 in scope; 4 violations or git failure; 2 bad input; 1 internal error (as in
 # trusted-findings.sh). JSON is printed on stdout; checked_sha is "" unless ok is true.
@@ -52,26 +63,40 @@ bad_input() { emit false "$(jq -n --arg r "$1" '[{path: null, reason: $r}]')" 2;
 
 ffile() { case "$1" in /*) printf '%s' "$1" ;; *) printf './%s' "$1" ;; esac; } # no leading '-'
 
-[[ $# -eq 3 ]] || bad_input "usage: check-fix-scope.sh <worktree> <dispatched-sha> <allowed-json>"
+usage="usage: check-fix-scope.sh [--base <base branch>] <worktree> <dispatched-sha> <allowed-json>"
+base=""
+if [[ ${1:-} == --base ]]; then
+  [[ $# -ge 2 ]] || bad_input "$usage"
+  base="$2"
+  shift 2
+  [[ $base =~ ^[A-Za-z0-9._/-]{1,200}$ ]] && git check-ref-format "refs/heads/$base" \
+    || bad_input "invalid base branch name"
+fi
+[[ $# -eq 3 ]] || bad_input "$usage"
 wt="$(ffile "$1")" sha="$2" allowed_file="$(ffile "$3")"
 [[ -d $wt ]] || bad_input "worktree not found"
 
-# Location (SR-F10, AR-F14): absolute, and not inside the repo under review, the PR worktree, or
-# any linked worktree of them (same git common dir). <config dir>/plugins/ is always accepted.
+# Location (SR-F10, AR-F14, SR-F18, CR-F21): absolute, and not inside the repo under review, the
+# PR worktree, or any linked worktree of them (same git common dir). The checks run for every
+# location, including an install under <config dir>/plugins/; a git dir whose common dir cannot
+# be resolved is refused, never skipped.
+location_fail() { bad_input "check-fix-scope.sh must not run from the repo under review or the PR worktree"; }
+common_dir() { # common_dir <dir>: absolute git common dir, "" outside git; exit 1 if unresolvable
+  git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || { printf ''; return 0; }
+  local c
+  c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && [[ -n $c ]] || return 1
+  realpath -- "$c"
+}
 case "$0" in /*) ;; *) bad_input "run from the plugin's installed copy by absolute path" ;; esac
 self="$(realpath -- "$0")"
-if [[ $self != "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/"* ]]; then
-  mine="$(git -C "$(dirname -- "$self")" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
-  for d in . "$wt"; do
-    if top="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" && [[ -n $top && $self == "$(realpath -- "$top")/"* ]]; then
-      bad_input "check-fix-scope.sh must not run from the repo under review or the PR worktree"
-    fi
-    if [[ -n $mine ]] && theirs="$(git -C "$d" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
-      && [[ "$(realpath -- "$mine")" == "$(realpath -- "$theirs")" ]]; then
-      bad_input "check-fix-scope.sh must not run from the repo under review or the PR worktree"
-    fi
-  done
-fi
+mine="$(common_dir "$(dirname -- "$self")")" || bad_input "cannot resolve the script's git common dir"
+for d in . "$wt"; do
+  if top="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" && [[ -n $top && $self == "$(realpath -- "$top")/"* ]]; then
+    location_fail
+  fi
+  theirs="$(common_dir "$d")" || bad_input "cannot resolve the git common dir of $d"
+  if [[ -n $mine && $mine == "$theirs" ]]; then location_fail; fi
+done
 
 [[ $sha =~ ^[0-9a-f]{40}$ ]] || bad_input "dispatched SHA must be the full 40-character SHA"
 [[ -f $allowed_file ]] || bad_input "allowed-json not found"
@@ -86,23 +111,33 @@ valid_path() { # a repo-relative path with no glob, '.', '..', leading '-', cont
   [[ $1 =~ ^[A-Za-z0-9._/@+-]+$ && $1 != /* && $1 != *//* && /$1/ != */./* && /$1/ != */../* && /$1 != */-* ]]
 }
 
+is_bootstrap() { # test-bootstrap file names, never allowed through a glob (CR-F18)
+  local b="${1##*/}"
+  b="${b,,}"
+  case "$b" in
+    conftest.py | pytest.ini | jest.setup.* | jest.config.* | setuptests.* | vitest.setup.* | vitest.config.*) return 0 ;;
+  esac
+  return 1
+}
+
 allowed=()
-dirs=()
+dirs=(tests/ test/ spec/ __tests__/) # root test directories; never "" (CR-F18)
 while IFS= read -r a; do
   valid_path "$a" || bad_input "allowed path rejected: must be repo-relative, no glob, '.', '..' or leading '-'"
   allowed+=("$a")
-  if [[ $a == */* ]]; then dirs+=("${a%/*}/"); else dirs+=(""); fi
+  if [[ $a == */* ]]; then dirs+=("${a%/*}/"); fi
 done < <(jq -r '(.paths // [])[]' "$allowed_file")
 globs=()
 while IFS= read -r g; do
   [[ $g =~ ^[A-Za-z0-9._/*-]+$ && $g != /* && $g != \** && /$g/ != */../* && /$g/ != */./* && /$g != */-* ]] \
     || bad_input "test glob rejected: only letters, digits, . _ / - and *, no leading '*' or '-'"
-  # SR-F16: the glob starts with the directory of one of the allowed paths.
+  # SR-F16, CR-F18: the glob starts with a test-glob root.
   in_dir=0
   for d in "${dirs[@]}"; do
     if [[ $g == "$d"* ]]; then in_dir=1; break; fi
   done
-  [[ $in_dir -eq 1 ]] || bad_input "test glob rejected: must start with the directory of an allowed path"
+  [[ $in_dir -eq 1 ]] || bad_input "test glob rejected: must start with the directory of a nested allowed path or tests/ test/ spec/ __tests__/"
+  ! is_bootstrap "$g" || bad_input "test glob rejected: names a test-bootstrap file"
   # CR-F12: markers checked against "/<glob>", so a root tests/ directory counts.
   [[ /$g == *.test.* || /$g == *.spec.* || /$g == *_test.* || /$g == */test/* || /$g == */tests/* \
     || /$g == */__tests__/* || /$g == */spec/* || ${g##*/} == test_* ]] \
@@ -115,11 +150,23 @@ done < <(jq -r '(.test_globs // [])[]' "$allowed_file")
 owner_dirs=(.github .gitlab .circleci .buildkite .woodpecker .gitea/workflows .forgejo/workflows
   .claude .claude-plugin .husky .githooks .vscode .devcontainer .cursor .yarn migrations supabase)
 # Plugin definitions, at the root, only when the repo is a Claude Code plugin (AR-F4): the
-# manifest exists at the dispatched SHA, or anywhere in its history or any fetched ref, including
-# the base branch (SR-F17), so a PR that deletes it does not switch the rule off.
+# manifest exists at the dispatched SHA, anywhere in that SHA's history (so a PR that deletes it
+# does not switch the rule off, SR-F17), or on origin/<base> when --base is given (AR-F19).
+# Unrelated branches do not count. Any unexpected git failure counts as a plugin repo.
+plugin_repo() {
+  local m=.claude-plugin/plugin.json out
+  git -C "$wt" cat-file -e "$sha:$m" 2>/dev/null && return 0
+  git -C "$wt" rev-parse --verify --quiet "$sha^{tree}" >/dev/null || return 0
+  out="$(git -C "$wt" log -1 --format=%H "$sha" -- "$m" 2>/dev/null)" || return 0
+  [[ -z $out ]] || return 0
+  if [[ -n $base ]]; then
+    git -C "$wt" rev-parse --verify --quiet "refs/remotes/origin/$base^{commit}" >/dev/null || return 0
+    git -C "$wt" cat-file -e "refs/remotes/origin/$base:$m" 2>/dev/null && return 0
+  fi
+  return 1
+}
 owner_root_dirs=()
-if git -C "$wt" cat-file -e "$sha:.claude-plugin/plugin.json" 2>/dev/null \
-  || [[ -n "$(git -C "$wt" log --all --format=%H -1 -- .claude-plugin/plugin.json 2>/dev/null)" ]]; then
+if plugin_repo; then
   owner_root_dirs=(agents commands skills hooks)
 fi
 # Exact repo-relative paths:
@@ -170,7 +217,7 @@ path_reason() { # path_reason <path>: print why the path is not allowed, nothing
   done
   for g in "${globs[@]}"; do
     # shellcheck disable=SC2053 # test globs are patterns on purpose
-    if [[ $p == $g ]]; then return; fi
+    if [[ $p == $g ]] && ! is_bootstrap "$p"; then return; fi
   done
   echo "out of scope"
 }

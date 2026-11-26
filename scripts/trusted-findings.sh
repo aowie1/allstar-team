@@ -65,20 +65,26 @@ check_fail() { # check_fail <reason>: refusal for the --check-* modes
 
 fail() { if [[ $mode == check ]]; then check_fail "$1"; else refuse "$1"; fi; }
 
-# Location (spec L1, SR-F10, AR-F14): an absolute path, and not from the repo the caller is
-# working in or any linked worktree of it (same git common dir). A marketplace install lives
-# under <config dir>/plugins/; a --plugin-dir development checkout of another repo is accepted.
+# Location (spec L1, SR-F10, AR-F14, SR-F18, CR-F21): an absolute path, and not from the repo the
+# caller is working in or any linked worktree of it (same git common dir). The checks run for
+# every location, including an install under <config dir>/plugins/; a --plugin-dir development
+# checkout of another repo passes them. A git dir whose common dir cannot be resolved is refused.
+common_dir() { # common_dir <dir>: absolute git common dir, "" outside git; exit 1 if unresolvable
+  git -C "$1" rev-parse --git-dir >/dev/null 2>&1 || { printf ''; return 0; }
+  local c
+  c="$(git -C "$1" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && [[ -n $c ]] || return 1
+  realpath -- "$c"
+}
 self_check() {
   local self top mine theirs
   case "$0" in /*) ;; *) fail "trusted-findings.sh must be run from the plugin's installed copy by absolute path" ;; esac
   self="$(realpath -- "$0")"
-  [[ $self == "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins/"* ]] && return 0
   if top="$(git rev-parse --show-toplevel 2>/dev/null)" && [[ -n $top && $self == "$(realpath -- "$top")/"* ]]; then
     fail "trusted-findings.sh must not run from the repo under review"
   fi
-  if mine="$(git -C "$(dirname -- "$self")" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
-    && theirs="$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" \
-    && [[ "$(realpath -- "$mine")" == "$(realpath -- "$theirs")" ]]; then
+  mine="$(common_dir "$(dirname -- "$self")")" || fail "trusted-findings.sh cannot resolve its git common dir"
+  theirs="$(common_dir .)" || fail "trusted-findings.sh cannot resolve the current repo's git common dir"
+  if [[ -n $mine && $mine == "$theirs" ]]; then
     fail "trusted-findings.sh must not run from the repo under review"
   fi
 }
@@ -237,7 +243,8 @@ check_ids() {
     elif [[ ! $p =~ ^[a-z0-9-]+:F[1-9][0-9]*$ ]]; then
       check_fail "malformed finding id: $p (use <reviewer>:F<n>)"
     fi
-    if [[ -n $file ]] && ! jq -e --arg id "$p" 'any(.findings[]; .id == $id)' "$file" >/dev/null; then
+    # CR-F22: an id in "rejected" is known too (it may only be skipped, never applied).
+    if [[ -n $file ]] && ! jq -e --arg id "$p" 'any((.findings + (.rejected // []))[]; .id == $id)' "$file" >/dev/null; then
       check_fail "unknown finding id: $p"
     fi
     ids+=("$p")
